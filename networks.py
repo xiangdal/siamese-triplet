@@ -3,19 +3,38 @@ import torch.nn.functional as F
 
 
 class EmbeddingNet(nn.Module):
-    def __init__(self):
+    def __init__(self, projection_layers=[256, 256, 2], use_bn=False):
         super(EmbeddingNet, self).__init__()
-        self.convnet = nn.Sequential(nn.Conv2d(1, 32, 5), nn.PReLU(),
-                                     nn.MaxPool2d(2, stride=2),
-                                     nn.Conv2d(32, 64, 5), nn.PReLU(),
-                                     nn.MaxPool2d(2, stride=2))
+        modules = [nn.Conv2d(1, 32, 5)]
+        if use_bn:
+            modules.append(nn.BatchNorm2d(32))
+        modules.extend([
+            nn.PReLU(),
+            nn.MaxPool2d(2, stride=2),
+            nn.Conv2d(32, 64, 5)])
+        if use_bn:
+            modules.append(nn.BatchNorm2d(64))
+        modules.extend([nn.PReLU(),
+            nn.MaxPool2d(2, stride=2)])
+        self.convnet = nn.Sequential(*modules)
 
-        self.fc = nn.Sequential(nn.Linear(64 * 4 * 4, 256),
-                                nn.PReLU(),
-                                nn.Linear(256, 256),
-                                nn.PReLU(),
-                                nn.Linear(256, 2)
-                                )
+        proj_layers = []
+        input_dim = 64 * 4 * 4
+        for i, out_dim in enumerate(projection_layers):
+            proj_layers.append(nn.Linear(input_dim, out_dim))
+            if use_bn:
+                modules.append(nn.BatchNorm1d(out_dim))
+            input_dim = out_dim
+            if i < (len(projection_layers) - 1):
+                proj_layers.append(nn.PReLU())
+
+        self.fc = nn.Sequential(*proj_layers)
+
+        # dimension of the embedding space
+        if projection_layers:
+            self.embd_dim = projection_layers[-1]
+        else:
+            self.embd_dim = input_dim
 
     def forward(self, x):
         output = self.convnet(x)
@@ -46,7 +65,7 @@ class ClassificationNet(nn.Module):
         self.embedding_net = embedding_net
         self.n_classes = n_classes
         self.nonlinear = nn.PReLU()
-        self.fc1 = nn.Linear(2, n_classes)
+        self.fc1 = nn.Linear(embedding_net.embd_dim, n_classes)
 
     def forward(self, x):
         output = self.embedding_net(x)
